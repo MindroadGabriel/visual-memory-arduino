@@ -1,3 +1,7 @@
+#include <Vector_datatype.h>
+#include <quaternion_type.h>
+#include <vector_type.h>
+
 #include <Bounce2.h>
 
 #include <Adafruit_SSD1306.h>
@@ -32,6 +36,45 @@ float accY = 0.0f;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define LOGO_HEIGHT   16
 #define LOGO_WIDTH    16
+
+class Boid {
+public:
+    vec3_t position;
+    static float velocity;
+    float x;
+    float y;
+    float angle;
+    Boid() {
+      this->x = 0.0f;
+      this->x = 0.0f;
+      this->angle = 2.0f;
+    }
+    void randomize() {
+        this->x = random(0, SCREEN_WIDTH - 1);
+        this->y = random(0, SCREEN_HEIGHT - 1);
+        this->angle = random(0, 2*PI);
+    }
+    void update(float deltaTime) {
+        this->x += cos(this->angle) * velocity * deltaTime;
+        this->y += sin(this->angle) * velocity * deltaTime;
+        while (this->x < 0.0f) {
+            this->x += SCREEN_WIDTH;
+        }
+        while (this->y < 0.0f) {
+            this->y += SCREEN_HEIGHT;
+        }
+        while (this->x > SCREEN_WIDTH) {
+            this->x -= SCREEN_WIDTH;
+        }
+        while (this->y > SCREEN_HEIGHT) {
+            this->y -= SCREEN_HEIGHT;
+        }
+    }
+    void render() {
+        display.drawPixel(this->x, this->y, WHITE);
+    }
+};
+float Boid::velocity = 50.0;
 void writeString(char* text) {
   char* c = text;
   while(*c) {
@@ -123,37 +166,68 @@ void setup() {
   }
 }
 
+#define NUM_BOIDS 30
+Boid boids[NUM_BOIDS];
 void loop() {
-
-    button1.update();
-    button2.update();
-    if (button1.fell()) {
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        writeString("Calibrating.\nKeep level.");
-        display.display();
-        delay(1000);
-
-        IMU.calibrateAccelGyro(&calib);
-        IMU.init(calib, IMU_ADDRESS);
-
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        writeString("Calibration done!");
-        display.display();
-        delay(800);
+    for (int i = 0; i < NUM_BOIDS; ++i) {
+        boids[i].randomize();
+        Serial.print("Creating boid with x: ");
+        Serial.print(boids[i].x);
+        Serial.print(", y: ");
+        Serial.print(boids[i].y);
+        Serial.print(", angle: ");
+        Serial.print(boids[i].angle);
+        Serial.print("\n");
     }
+    while (true) {
+        for (auto boid : boids) {
+            // Separation
+            static float separation_dist_squared = 5 * 5;
+            float separation_x = 0.0f;
+            float separation_y = 0.0f;
+            uint8_t separation_count = 0;
+            for (auto other : boids) {
+//                float x_distance = (boid->x - other->x);
+//                float y_distance = (boid->y - other->y);
+//                float distance_squared = x_distance * x_distance + y_distance * y_distance;
+//                if (distance_squared > 0 && distance_squared < separation_dist_squared) {
+//                    separation_x += distance_squared;
+//                    separation_count += 1;
+//                }
 
-  IMU.update();
-  IMU.getAccel(&accelData);
-  display.clearDisplay();
-  display.setCursor(0, 0);
+            }
+            // Aligment
+            // Cohesion
+        }
+        button1.update();
+        button2.update();
+        if (button1.fell()) {
+            display.clearDisplay();
+            display.setCursor(0, 0);
+            writeString("Calibrating.\nKeep level.");
+            display.display();
+            delay(1000);
 
-  accX += accelData.accelX;
-  accY += accelData.accelY;
-  float factor = 2.5;
-  int16_t x = CIRCLE_RADIUS + ((accelData.accelY*factor + 1) / 2) * (SCREEN_WIDTH - CIRCLE_RADIUS);
-  int16_t y = CIRCLE_RADIUS + ((accelData.accelX*factor + 1) / 2) * (SCREEN_HEIGHT - CIRCLE_RADIUS);
+            IMU.calibrateAccelGyro(&calib);
+            IMU.init(calib, IMU_ADDRESS);
+
+            display.clearDisplay();
+            display.setCursor(0, 0);
+            writeString("Calibration done!");
+            display.display();
+            delay(800);
+        }
+
+        IMU.update();
+        IMU.getAccel(&accelData);
+        display.clearDisplay();
+        display.setCursor(0, 0);
+
+        accX += accelData.accelX;
+        accY += accelData.accelY;
+        float factor = 2.5;
+        int16_t x = CIRCLE_RADIUS + ((accelData.accelY*factor + 1) / 2) * (SCREEN_WIDTH - CIRCLE_RADIUS);
+        int16_t y = CIRCLE_RADIUS + ((accelData.accelX*factor + 1) / 2) * (SCREEN_HEIGHT - CIRCLE_RADIUS);
 //  writeFloatString(accelData.accelX);
 //  writeString(", ");
 //  writeFloatString(accelData.accelY);
@@ -161,13 +235,20 @@ void loop() {
 //  writeFloatString((float)x);
 //  writeString(", ");
 //  writeFloatString((float)y);
-  display.drawCircle(x, y, CIRCLE_RADIUS, SSD1306_WHITE);
-  //writeString("\nTEMPERATURE = ");
-  //writeString("\nTEMPERATURE = ");
-  //writeFloatString(temperature);
-  //writeString(", HUMIDITY = ");
-  //writeFloatString(humidity);
-  //writeString("\n");
-  display.display();
-  delay(50);
+        display.drawCircle(x, y, CIRCLE_RADIUS, SSD1306_WHITE);
+        //writeString("\nTEMPERATURE = ");
+        //writeString("\nTEMPERATURE = ");
+        //writeFloatString(temperature);
+        //writeString(", HUMIDITY = ");
+        //writeFloatString(humidity);
+        //writeString("\n");
+        for (int i = 0; i < NUM_BOIDS; ++i) {
+            boids[i].update(1.0f/50.0f);
+        }
+        for (int i = 0; i < NUM_BOIDS; ++i) {
+            boids[i].render();
+        }
+        display.display();
+        delay(50);
+    }
 }
