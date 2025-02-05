@@ -20,27 +20,28 @@ BMI160 IMU;               //Change to the name of any supported IMU!
 
 calData calib = { 0 };  //Calibration data
 AccelData accelData;    //Sensor data
-GyroData gyroData;
-MagData magData;
 
 Bounce button1 = Bounce();
 Bounce button2 = Bounce();
 
-float accX = 0.0f;
-float accY = 0.0f;
-
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 32 // OLED display height, in pixels
-#define CIRCLE_RADIUS 5
-#define BOIDS_SCALE 2
+#define CIRCLE_RADIUS 3
+#define BOIDS_SCALE 1
 #define TIME_SCALE (3.0f)
-const int NUM_MAX_BOIDS = 13;
-const float sep_distance = 25.0f;
-const float ali_distance = 50;
-const float coh_distance = 50;
+const int NUM_MAX_BOIDS = 10;
+const float sep_distance = 15.0f;
+const float ali_distance = 25;
+const float coh_distance = 30;
+const float pred_distance = 15;
 const float sep_weight = 1.5;
-const float ali_weight = 1.0;
-const float coh_weight = 1.5;
+const float ali_weight = 0.8;
+const float coh_weight = 1.2;
+const float pred_weight = 2.0;
+const float r = 2.0f;
+const float maxforce = 0.03f * TIME_SCALE; // Maximum steering force
+const float pred_maxforce = 0.1 * TIME_SCALE;
+const float maxspeed = 2.0; // Maximum speed
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET     4 // Reset pq  §in # (or -1 if sharing Arduino reset pin)
@@ -51,32 +52,34 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 float distance(vec3_t from, vec3_t to);
 void limit(vec3_t &vec, float max_magnitude);
 
-static float r = 2.0f;
-static float maxforce = 0.03f; // Maximum steering force
-static float maxspeed = 2.0; // Maximum speed
 class Boid {
 public:
     vec3_t position;
     vec3_t velocity;
     Boid() {}
     void initialize(float x, float y) {
-        float angle = random(0.0f, 2.0f*PI);
-        velocity = vec3_t(cos(angle), sin(angle));
+        randomize_direction();
         position = vec3_t(x, y);
     }
-    void run(Vector<Boid> &boids, bool log) {
-        vec3_t acceleration = flock(boids, log);
+    void randomize_direction() {
+        float angle = random(0.0f, 2.0f*PI);
+        velocity = vec3_t(cos(angle), sin(angle));
+    }
+    void run(Vector<Boid> &boids, vec3_t predator_location, bool log) {
+        vec3_t acceleration = flock(boids, predator_location, log);
         update(acceleration, log);
         borders();
         render();
     }
-    vec3_t flock(Vector<Boid> &boids, bool log) {
+    vec3_t flock(Vector<Boid> &boids, vec3_t predator_location, bool log) {
         vec3_t sep = separate(boids);
         vec3_t ali = align(boids);
         vec3_t coh = cohesion(boids);
+        vec3_t pred = predator(predator_location);
         sep *= sep_weight;
         ali *= ali_weight;
         coh *= coh_weight;
+        pred *= pred_weight;
         if (log) {
             Serial.print("flock: ");
             Serial.print(sep.x);
@@ -97,6 +100,7 @@ public:
         acceleration += sep;
         acceleration += ali;
         acceleration += coh;
+        acceleration += pred;
         return acceleration;
     }
     void update(vec3_t acceleration, bool log) {
@@ -225,6 +229,27 @@ public:
             return vec3_t(0, 0);
         }
     }
+    // Predator
+    // Method avoids the predator chasing boids
+    vec3_t predator(vec3_t predator_location) {
+        vec3_t steer = vec3_t(0, 0, 0);
+        float d = distance(position, predator_location);
+        if ((d > 0) && (d < pred_distance)) {
+            vec3_t diff = position - predator_location;
+            diff.norm();
+            diff /= d;
+            steer += diff;
+        }
+
+        if (steer.mag() > 0) {
+            // Implement Reynolds: Steering = Desired - Velocity
+            steer.norm();
+            steer *= maxspeed;
+            steer -= velocity;
+            limit(steer, pred_maxforce);
+        }
+        return steer;
+    }
 
 //    static float velocity;
 //    float x;
@@ -331,30 +356,6 @@ void setup() {
     }
   }
   
-#ifdef PERFORM_CALIBRATION
-  Serial.println("FastIMU calibration & data example");
-  if (IMU.hasMagnetometer()) {
-    delay(1000);
-    Serial.println("Move IMU in figure 8 pattern until done.");
-    delay(3000);
-    IMU.calibrateMag(&calib);
-    Serial.println("Magnetic calibration done!");
-  }
-  else {
-    delay(5000);
-  }
-
-  delay(5000);
-  Serial.println("Keep IMU level.");
-  delay(5000);
-  IMU.calibrateAccelGyro(&calib);
-  delay(5000);
-  IMU.init(calib, IMU_ADDRESS);
-#endif
-
-  //err = IMU.setGyroRange(500);      //USE THESE TO SET THE RANGE, IF AN INVALID RANGE IS SET IT WILL RETURN -1
-  //err = IMU.setAccelRange(2);       //THESE TWO SET THE GYRO RANGE TO ±500 DPS AND THE ACCELEROMETER RANGE TO ±2g
-
   if (err != 0) {
     Serial.print("Error Setting range: ");
     Serial.println(err);
@@ -364,8 +365,8 @@ void setup() {
   }
 }
 
-Boid storage_array[NUM_MAX_BOIDS];
 void loop() {
+    Boid storage_array[NUM_MAX_BOIDS];
     Vector<Boid> boids(storage_array);
     for (int i = 0; i < NUM_MAX_BOIDS; ++i) {
         Boid boid = Boid();
@@ -392,16 +393,21 @@ void loop() {
             delay(800);
         }
 
+        if (button2.fell()) {
+            for (Boid &boid : boids) {
+                boid.randomize_direction();
+            }
+        }
+
         IMU.update();
         IMU.getAccel(&accelData);
         display.clearDisplay();
         display.setCursor(0, 0);
 
-        accX += accelData.accelX;
-        accY += accelData.accelY;
         float factor = 2.5;
         int16_t x = CIRCLE_RADIUS + ((accelData.accelY*factor + 1) / 2) * (SCREEN_WIDTH - CIRCLE_RADIUS);
         int16_t y = CIRCLE_RADIUS + ((accelData.accelX*factor + 1) / 2) * (SCREEN_HEIGHT - CIRCLE_RADIUS);
+        vec3_t predator_location = vec3_t(x, y);
 //  writeFloatString(accelData.accelX);
 //  writeString(", ");
 //  writeFloatString(accelData.accelY);
@@ -424,7 +430,7 @@ void loop() {
 //        }
         bool first = true;
         for (Boid &boid : boids) {
-            boid.run(boids, first);
+            boid.run(boids, predator_location, first);
             first = false;
         }
         Serial.println();
