@@ -32,6 +32,15 @@ float accY = 0.0f;
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 32 // OLED display height, in pixels
 #define CIRCLE_RADIUS 5
+#define BOIDS_SCALE 2
+#define TIME_SCALE (3.0f)
+const int NUM_MAX_BOIDS = 13;
+const float sep_distance = 25.0f;
+const float ali_distance = 50;
+const float coh_distance = 50;
+const float sep_weight = 1.5;
+const float ali_weight = 1.0;
+const float coh_weight = 1.5;
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET     4 // Reset pq  §in # (or -1 if sharing Arduino reset pin)
@@ -42,39 +51,32 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 float distance(vec3_t from, vec3_t to);
 void limit(vec3_t &vec, float max_magnitude);
 
+static float r = 2.0f;
+static float maxforce = 0.03f; // Maximum steering force
+static float maxspeed = 2.0; // Maximum speed
 class Boid {
 public:
     vec3_t position;
     vec3_t velocity;
-    vec3_t acceleration;
-    float r;
-    float maxforce; // Maximum steering force
-    float maxspeed; // Maximum speed
     Boid() {}
     void initialize(float x, float y) {
         float angle = random(0.0f, 2.0f*PI);
         velocity = vec3_t(cos(angle), sin(angle));
         position = vec3_t(x, y);
-        r = 2.0f;
-        maxspeed = 2.0f;
-        maxforce = 0.03f;
     }
     void run(Vector<Boid> &boids, bool log) {
-        flock(boids, log);
-        update(log);
+        vec3_t acceleration = flock(boids, log);
+        update(acceleration, log);
         borders();
         render();
     }
-    void applyForce(vec3_t force) {
-        acceleration += force;
-    }
-    void flock(Vector<Boid> &boids, bool log) {
+    vec3_t flock(Vector<Boid> &boids, bool log) {
         vec3_t sep = separate(boids);
         vec3_t ali = align(boids);
         vec3_t coh = cohesion(boids);
-        sep *= 1.5;
-        ali *= 1.0;
-        coh *= 1.0;
+        sep *= sep_weight;
+        ali *= ali_weight;
+        coh *= coh_weight;
         if (log) {
             Serial.print("flock: ");
             Serial.print(sep.x);
@@ -91,11 +93,13 @@ public:
             Serial.print("  ");
         }
 
-        applyForce(sep);
-        applyForce(ali);
-        applyForce(coh);
+        vec3_t acceleration = vec3_t(0, 0);
+        acceleration += sep;
+        acceleration += ali;
+        acceleration += coh;
+        return acceleration;
     }
-    void update(bool log) {
+    void update(vec3_t acceleration, bool log) {
         if (log) {
             Serial.print("update: ");
             Serial.print(acceleration.x);
@@ -115,9 +119,7 @@ public:
         velocity += acceleration;
         // Limit speed
         limit(velocity, maxspeed);
-        position += velocity;
-        // Reset acceleration to 0 each cycle
-        acceleration *= 0;
+        position += velocity * TIME_SCALE;
     }
 
     vec3_t seek(vec3_t target) {
@@ -133,12 +135,17 @@ public:
     }
 
     void render() {
-        display.drawPixel(position.x, position.y, WHITE);
+        int16_t top_left_x = position.x * BOIDS_SCALE;
+        int16_t top_left_y = position.y * BOIDS_SCALE;
+        display.drawPixel(top_left_x, top_left_y, WHITE);
+        display.drawPixel(top_left_x + 1, top_left_y, WHITE);
+        display.drawPixel(top_left_x, top_left_y + 1, WHITE);
+        display.drawPixel(top_left_x + 1, top_left_y + 1, WHITE);
     }
 
     void borders() {
-        float width = SCREEN_WIDTH;
-        float height = SCREEN_HEIGHT;
+        float width = (float)SCREEN_WIDTH / BOIDS_SCALE;
+        float height = (float)SCREEN_HEIGHT / BOIDS_SCALE;
         if (position.x < -r) position.x = width + r;
         if (position.y < -r) position.y = height + r;
         if (position.x > width + r) position.x = -r;
@@ -148,12 +155,11 @@ public:
     // Separation
     // Method checks for nearby boids and steers away
     vec3_t separate(Vector<Boid> &boids) {
-        float desiredseparation = 25.0f;
         vec3_t steer = vec3_t(0, 0, 0);
         int count = 0;
         for (Boid &other : boids) {
             float d = distance(position, other.position);
-            if ((d > 0) && (d < desiredseparation)) {
+            if ((d > 0) && (d < sep_distance)) {
                 vec3_t diff = position - other.position;
                 diff.norm();
                 diff /= d;
@@ -178,12 +184,11 @@ public:
     // Alignment
     // For every nearby boid in the system, calculate the average velocity
     vec3_t align(Vector<Boid> &boids) {
-        float neighbourdist = 50;
         vec3_t sum = vec3_t(0, 0);
         int count = 0;
         for (Boid &other : boids) {
             float d = distance(position, other.position);
-            if ((d > 0) && (d < neighbourdist)) {
+            if ((d > 0) && (d < ali_distance)) {
                 sum += other.velocity;
                 count++;
             }
@@ -204,12 +209,11 @@ public:
     // For the average position (i.e. center) of all nearby boids,
     // calculate steering vector towards that position
     vec3_t cohesion(Vector<Boid> &boids) {
-        float neighbourdist = 50;
         vec3_t sum = vec3_t(0, 0);
         int count = 0;
         for (Boid other : boids) {
             float d = distance(position, other.position);
-            if ((d > 0) && (d < neighbourdist)) {
+            if ((d > 0) && (d < coh_distance)) {
                 sum += other.position;
                 count++;
             }
@@ -360,9 +364,8 @@ void setup() {
   }
 }
 
+Boid storage_array[NUM_MAX_BOIDS];
 void loop() {
-    const int NUM_MAX_BOIDS = 5;
-    Boid storage_array[NUM_MAX_BOIDS];
     Vector<Boid> boids(storage_array);
     for (int i = 0; i < NUM_MAX_BOIDS; ++i) {
         Boid boid = Boid();
@@ -426,6 +429,6 @@ void loop() {
         }
         Serial.println();
         display.display();
-        delay(50);
+//        delay(50);
     }
 }
