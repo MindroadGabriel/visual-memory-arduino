@@ -1,3 +1,5 @@
+#include <Vector.h>
+
 #include <Vector_datatype.h>
 #include <quaternion_type.h>
 #include <vector_type.h>
@@ -37,44 +39,236 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define LOGO_HEIGHT   16
 #define LOGO_WIDTH    16
 
+float distance(vec3_t from, vec3_t to);
+void limit(vec3_t &vec, float max_magnitude);
+
 class Boid {
 public:
     vec3_t position;
-    static float velocity;
-    float x;
-    float y;
-    float angle;
-    Boid() {
-      this->x = 0.0f;
-      this->x = 0.0f;
-      this->angle = 2.0f;
+    vec3_t velocity;
+    vec3_t acceleration;
+    float r;
+    float maxforce; // Maximum steering force
+    float maxspeed; // Maximum speed
+    Boid() {}
+    void initialize(float x, float y) {
+        float angle = random(0.0f, 2.0f*PI);
+        velocity = vec3_t(cos(angle), sin(angle));
+        position = vec3_t(x, y);
+        r = 2.0f;
+        maxspeed = 2.0f;
+        maxforce = 0.03f;
     }
-    void randomize() {
-        this->x = random(0, SCREEN_WIDTH - 1);
-        this->y = random(0, SCREEN_HEIGHT - 1);
-        this->angle = random(0, 2*PI);
+    void run(Vector<Boid> &boids, bool log) {
+        flock(boids, log);
+        update(log);
+        borders();
+        render();
     }
-    void update(float deltaTime) {
-        this->x += cos(this->angle) * velocity * deltaTime;
-        this->y += sin(this->angle) * velocity * deltaTime;
-        while (this->x < 0.0f) {
-            this->x += SCREEN_WIDTH;
-        }
-        while (this->y < 0.0f) {
-            this->y += SCREEN_HEIGHT;
-        }
-        while (this->x > SCREEN_WIDTH) {
-            this->x -= SCREEN_WIDTH;
-        }
-        while (this->y > SCREEN_HEIGHT) {
-            this->y -= SCREEN_HEIGHT;
-        }
+    void applyForce(vec3_t force) {
+        acceleration += force;
     }
+    void flock(Vector<Boid> &boids, bool log) {
+        vec3_t sep = separate(boids);
+        vec3_t ali = align(boids);
+        vec3_t coh = cohesion(boids);
+        sep *= 1.5;
+        ali *= 1.0;
+        coh *= 1.0;
+        if (log) {
+            Serial.print("flock: ");
+            Serial.print(sep.x);
+            Serial.print(":");
+            Serial.print(sep.y);
+            Serial.print(", ");
+            Serial.print(ali.x);
+            Serial.print(":");
+            Serial.print(ali.y);
+            Serial.print(", ");
+            Serial.print(coh.x);
+            Serial.print(":");
+            Serial.print(coh.y);
+            Serial.print("  ");
+        }
+
+        applyForce(sep);
+        applyForce(ali);
+        applyForce(coh);
+    }
+    void update(bool log) {
+        if (log) {
+            Serial.print("update: ");
+            Serial.print(acceleration.x);
+            Serial.print(":");
+            Serial.print(acceleration.y);
+            Serial.print(", ");
+            Serial.print(velocity.x);
+            Serial.print(":");
+            Serial.print(velocity.y);
+            Serial.print(", ");
+            Serial.print(position.x);
+            Serial.print(":");
+            Serial.print(position.y);
+            Serial.print("  ");
+        }
+        // Update velocity
+        velocity += acceleration;
+        // Limit speed
+        limit(velocity, maxspeed);
+        position += velocity;
+        // Reset acceleration to 0 each cycle
+        acceleration *= 0;
+    }
+
+    vec3_t seek(vec3_t target) {
+        // A vector pointing from the position to the target
+        vec3_t desired = target - position;
+        // Scale to maximum speed
+        desired.norm();
+        desired *= maxspeed;
+
+        vec3_t steer = desired - velocity;
+        limit(steer, maxforce);
+        return steer;
+    }
+
     void render() {
-        display.drawPixel(this->x, this->y, WHITE);
+        display.drawPixel(position.x, position.y, WHITE);
     }
+
+    void borders() {
+        float width = SCREEN_WIDTH;
+        float height = SCREEN_HEIGHT;
+        if (position.x < -r) position.x = width + r;
+        if (position.y < -r) position.y = height + r;
+        if (position.x > width + r) position.x = -r;
+        if (position.y > height + r) position.y = -r;
+    }
+
+    // Separation
+    // Method checks for nearby boids and steers away
+    vec3_t separate(Vector<Boid> &boids) {
+        float desiredseparation = 25.0f;
+        vec3_t steer = vec3_t(0, 0, 0);
+        int count = 0;
+        for (Boid &other : boids) {
+            float d = distance(position, other.position);
+            if ((d > 0) && (d < desiredseparation)) {
+                vec3_t diff = position - other.position;
+                diff.norm();
+                diff /= d;
+                steer += diff;
+                count++;
+            }
+        }
+        if (count > 0) {
+            steer /= (float)count;
+        }
+
+        if (steer.mag() > 0) {
+            // Implement Reynolds: Steering = Desired - Velocity
+            steer.norm();
+            steer *= maxspeed;
+            steer -= velocity;
+            limit(steer, maxforce);
+        }
+        return steer;
+    }
+
+    // Alignment
+    // For every nearby boid in the system, calculate the average velocity
+    vec3_t align(Vector<Boid> &boids) {
+        float neighbourdist = 50;
+        vec3_t sum = vec3_t(0, 0);
+        int count = 0;
+        for (Boid &other : boids) {
+            float d = distance(position, other.position);
+            if ((d > 0) && (d < neighbourdist)) {
+                sum += other.velocity;
+                count++;
+            }
+        }
+        if (count > 0) {
+            sum /= (float)count;
+            sum.norm();
+            sum *= maxspeed;
+            vec3_t steer = sum - velocity;
+            limit(steer, maxforce);
+            return steer;
+        } else {
+            return vec3_t(0, 0);
+        }
+    }
+
+    // Cohesion
+    // For the average position (i.e. center) of all nearby boids,
+    // calculate steering vector towards that position
+    vec3_t cohesion(Vector<Boid> &boids) {
+        float neighbourdist = 50;
+        vec3_t sum = vec3_t(0, 0);
+        int count = 0;
+        for (Boid other : boids) {
+            float d = distance(position, other.position);
+            if ((d > 0) && (d < neighbourdist)) {
+                sum += other.position;
+                count++;
+            }
+        }
+        if (count > 0) {
+            sum /= count;
+            return seek(sum);
+        } else {
+            return vec3_t(0, 0);
+        }
+    }
+
+//    static float velocity;
+//    float x;
+//    float y;
+//    float angle;
+//    Boid() {
+//      this->x = 0.0f;
+//      this->x = 0.0f;
+//      this->angle = 2.0f;
+//    }
+//    void randomize() {
+//        this->x = random(0, SCREEN_WIDTH - 1);
+//        this->y = random(0, SCREEN_HEIGHT - 1);
+//        this->angle = random(0, 2*PI);
+//    }
+//    void update(float deltaTime) {
+//        this->x += cos(this->angle) * velocity * deltaTime;
+//        this->y += sin(this->angle) * velocity * deltaTime;
+//        while (this->x < 0.0f) {
+//            this->x += SCREEN_WIDTH;
+//        }
+//        while (this->y < 0.0f) {
+//            this->y += SCREEN_HEIGHT;
+//        }
+//        while (this->x > SCREEN_WIDTH) {
+//            this->x -= SCREEN_WIDTH;
+//        }
+//        while (this->y > SCREEN_HEIGHT) {
+//            this->y -= SCREEN_HEIGHT;
+//        }
+//    }
+//    void render() {
+//        display.drawPixel(this->x, this->y, WHITE);
+//    }
 };
-float Boid::velocity = 50.0;
+//float Boid::velocity = 50.0;
+
+float distance(vec3_t from, vec3_t to) {
+    return (from - to).mag();
+}
+void limit(vec3_t &vec, float max_magnitude) {
+    float mag = vec.mag();
+    if (mag > 0 && mag > max_magnitude) {
+        vec /= mag;
+        vec *= max_magnitude;
+    }
+}
+
 void writeString(char* text) {
   char* c = text;
   while(*c) {
@@ -166,39 +360,16 @@ void setup() {
   }
 }
 
-#define NUM_BOIDS 30
-Boid boids[NUM_BOIDS];
 void loop() {
-    for (int i = 0; i < NUM_BOIDS; ++i) {
-        boids[i].randomize();
-        Serial.print("Creating boid with x: ");
-        Serial.print(boids[i].x);
-        Serial.print(", y: ");
-        Serial.print(boids[i].y);
-        Serial.print(", angle: ");
-        Serial.print(boids[i].angle);
-        Serial.print("\n");
+    const int NUM_MAX_BOIDS = 5;
+    Boid storage_array[NUM_MAX_BOIDS];
+    Vector<Boid> boids(storage_array);
+    for (int i = 0; i < NUM_MAX_BOIDS; ++i) {
+        Boid boid = Boid();
+        boid.initialize(10, 10);
+        boids.push_back(boid);
     }
     while (true) {
-        for (auto boid : boids) {
-            // Separation
-            static float separation_dist_squared = 5 * 5;
-            float separation_x = 0.0f;
-            float separation_y = 0.0f;
-            uint8_t separation_count = 0;
-            for (auto other : boids) {
-//                float x_distance = (boid->x - other->x);
-//                float y_distance = (boid->y - other->y);
-//                float distance_squared = x_distance * x_distance + y_distance * y_distance;
-//                if (distance_squared > 0 && distance_squared < separation_dist_squared) {
-//                    separation_x += distance_squared;
-//                    separation_count += 1;
-//                }
-
-            }
-            // Aligment
-            // Cohesion
-        }
         button1.update();
         button2.update();
         if (button1.fell()) {
@@ -242,12 +413,18 @@ void loop() {
         //writeString(", HUMIDITY = ");
         //writeFloatString(humidity);
         //writeString("\n");
-        for (int i = 0; i < NUM_BOIDS; ++i) {
-            boids[i].update(1.0f/50.0f);
+//        for (int i = 0; i < NUM_BOIDS; ++i) {
+//            boids[i].update(1.0f/50.0f);
+//        }
+//        for (int i = 0; i < NUM_BOIDS; ++i) {
+//            boids[i].render();
+//        }
+        bool first = true;
+        for (Boid &boid : boids) {
+            boid.run(boids, first);
+            first = false;
         }
-        for (int i = 0; i < NUM_BOIDS; ++i) {
-            boids[i].render();
-        }
+        Serial.println();
         display.display();
         delay(50);
     }
