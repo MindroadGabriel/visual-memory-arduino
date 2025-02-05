@@ -1,3 +1,5 @@
+#include <Bounce2.h>
+
 #include <Adafruit_SSD1306.h>
 #include <splash.h>
 
@@ -14,6 +16,9 @@ calData calib = { 0 };  //Calibration data
 AccelData accelData;    //Sensor data
 GyroData gyroData;
 MagData magData;
+
+Bounce button1 = Bounce();
+Bounce button2 = Bounce();
 
 float accX = 0.0f;
 float accY = 0.0f;
@@ -55,6 +60,13 @@ void setup() {
     ;
   }
 
+    pinMode(5,INPUT_PULLUP);
+    button1.attach(5);
+    button1.interval(10);// interval in ms
+    pinMode(4,INPUT_PULLUP);
+    button2.attach(4);
+    button2.interval(10); // interval in ms
+
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
     Serial.println(F("SSD1306 allocation failed"));
     for(;;); // Don't proceed, loop forever
@@ -95,33 +107,6 @@ void setup() {
   Serial.println("Keep IMU level.");
   delay(5000);
   IMU.calibrateAccelGyro(&calib);
-  Serial.println("Calibration done!");
-  Serial.println("Accel biases X/Y/Z: ");
-  Serial.print(calib.accelBias[0]);
-  Serial.print(", ");
-  Serial.print(calib.accelBias[1]);
-  Serial.print(", ");
-  Serial.println(calib.accelBias[2]);
-  Serial.println("Gyro biases X/Y/Z: ");
-  Serial.print(calib.gyroBias[0]);
-  Serial.print(", ");
-  Serial.print(calib.gyroBias[1]);
-  Serial.print(", ");
-  Serial.println(calib.gyroBias[2]);
-  if (IMU.hasMagnetometer()) {
-    Serial.println("Mag biases X/Y/Z: ");
-    Serial.print(calib.magBias[0]);
-    Serial.print(", ");
-    Serial.print(calib.magBias[1]);
-    Serial.print(", ");
-    Serial.println(calib.magBias[2]);
-    Serial.println("Mag Scale X/Y/Z: ");
-    Serial.print(calib.magScale[0]);
-    Serial.print(", ");
-    Serial.print(calib.magScale[1]);
-    Serial.print(", ");
-    Serial.println(calib.magScale[2]);
-  }
   delay(5000);
   IMU.init(calib, IMU_ADDRESS);
 #endif
@@ -139,53 +124,31 @@ void setup() {
 }
 
 void loop() {
+
+    button1.update();
+    button2.update();
+    if (button1.fell()) {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        writeString("Calibrating.\nKeep level.");
+        display.display();
+        delay(1000);
+
+        IMU.calibrateAccelGyro(&calib);
+        IMU.init(calib, IMU_ADDRESS);
+
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        writeString("Calibration done!");
+        display.display();
+        delay(800);
+    }
+
   IMU.update();
   IMU.getAccel(&accelData);
   display.clearDisplay();
   display.setCursor(0, 0);
-  Serial.print(accelData.accelX);
-  Serial.print("\t");
-  Serial.print(accelData.accelY);
-  Serial.print("\t");
-  Serial.print(accelData.accelZ);
-  Serial.print("\t");
-//  writeFloatString(accelData.accelX);
-//  writeString(", ");
-//  writeFloatString(accelData.accelY);
-//  writeString(", ");
-//  writeFloatString(accelData.accelZ);
-//  writeString("\n");
-  IMU.getGyro(&gyroData);
-  Serial.print(gyroData.gyroX);
-  Serial.print("\t");
-  Serial.print(gyroData.gyroY);
-  Serial.print("\t");
-  Serial.print(gyroData.gyroZ);
-//  writeFloatString(gyroData.gyroX);
-//  writeString(", ");
-//  writeFloatString(gyroData.gyroY);
-//  writeString(", ");
-//  writeFloatString(gyroData.gyroZ);
-//  writeString("\n");
-  if (IMU.hasMagnetometer()) {
-    IMU.getMag(&magData);
-    Serial.print("\t");
-    Serial.print(magData.magX);
-    Serial.print("\t");
-    Serial.print(magData.magY);
-    Serial.print("\t");
-    Serial.print(magData.magZ);
-  }
-  if (IMU.hasTemperature()) {
-	  Serial.print("\t");
-    float temperature = IMU.getTemp();
-	  Serial.println(temperature);
-//    writeFloatString(temperature);
-//    writeString(" deg C\n");
-  }
-  else {
-    Serial.println();
-  }
+
   accX += accelData.accelX;
   accY += accelData.accelY;
   float factor = 2.5;
