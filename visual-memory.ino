@@ -127,7 +127,7 @@ void loop() {
         switch (gameState) {
             case GameState::Menu: {
                 writeString("Sequence memory! Try buttons.");
-                writeString("\nPush both buttons to start.\n");
+                writeString("\nPush both buttons to start. ");
                 if (button1.read() == LOW && button2.read() == LOW) {
                     gameState = GameState::Displaying;
                     nextGuessIndex = 0;
