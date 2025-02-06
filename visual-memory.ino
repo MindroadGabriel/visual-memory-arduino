@@ -105,6 +105,7 @@ enum class GameState {
     Menu,
     Displaying,
     Inputting,
+    Next,
     Failure,
     Score,
 };
@@ -125,8 +126,8 @@ void loop() {
         display.setCursor(0, 0);
         switch (gameState) {
             case GameState::Menu: {
-                writeString("Sequence memory!");
-                writeString("\nPush both buttons.\n");
+                writeString("Sequence memory! Try buttons.");
+                writeString("\nPush both buttons to start.\n");
                 if (button1.read() == LOW && button2.read() == LOW) {
                     gameState = GameState::Displaying;
                     nextGuessIndex = 0;
@@ -163,29 +164,33 @@ void loop() {
                     if (sequence[nextGuessIndex] == false) {
                         nextGuessIndex++;
                     } else {
-                        gameState = GameState::Failure;
+                        gameState = GameState::Inputting;
                     }
                 } else if (button2.fell()) {
                     if (sequence[nextGuessIndex] == true) {
                         nextGuessIndex++;
                     } else {
-                        gameState = GameState::Failure;
+                        gameState = GameState::Inputting;
                     }
                 }
                 renderSequence(sequence, nextGuessIndex);
                 if (nextGuessIndex == sequence.size()) {
-                    if (first) {
-                        displayTemporaryMessage("Good!", 1000);
-                        displayTemporaryMessage("Next sequence:", 1000);
-                    } else {
-                        displayTemporaryMessage("Good! Next:", 400);
-                    }
-                    generateSequence(sequence, sequence.size() + 1);
-                    nextGuessIndex = 0;
-                    highestCleared = sequence.size();
-                    gameState = GameState::Displaying;
-                    first = false;
+                    gameState = GameState::Next;
                 }
+                break;
+            }
+            case GameState::Next: {
+                if (first) {
+                    displayTemporaryMessage("Good!", 1000);
+                    displayTemporaryMessage("Next sequence:", 1000);
+                } else {
+                    displayTemporaryMessage("Good! Next:", 400);
+                }
+                generateSequence(sequence, sequence.size() + 1);
+                nextGuessIndex = 0;
+                highestCleared = sequence.size();
+                gameState = GameState::Displaying;
+                first = false;
                 break;
             }
             case GameState::Failure: {
@@ -208,7 +213,6 @@ void loop() {
                 break;
             }
         }
-
 
         display.display();
         delay(10);
