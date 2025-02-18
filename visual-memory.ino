@@ -20,35 +20,6 @@ Bounce button2 = Bounce();
 
 #define OLED_RESET     4 // Reset pq  §in # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-void writeString(char* text) {
-    char* c = text;
-    while (*c) {
-        display.write(*c);
-        c++;
-    }
-}
-
-void writeFloatString(float n) {
-    char buffer[128];
-    dtostrf(n, 4, 1, buffer);
-    int len = strlen(buffer);
-    Serial.print("Len:");
-    int desired_length = 6;
-    for (int i = 0; i < len - desired_length; ++i) {
-        writeString(" ");
-    }
-    writeString(buffer);
-}
-void displayTemporaryMessage(const char* message, int delayTime) {
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    writeString(message);
-    display.display();
-    delay(delayTime);
-    display.clearDisplay();
-    display.setCursor(0, 0);
-}
 void setup() {
     Wire.begin();
     Wire.setClock(10000); //400khz clock
@@ -76,6 +47,36 @@ void setup() {
     display.setCursor(0, 0);     // Start at top-left corner
     display.cp437(true);         // Use full 256 char 'Code Page 437' font
     display.display();
+}
+
+void writeString(char* text) {
+    char* c = text;
+    while (*c) {
+        display.write(*c);
+        c++;
+    }
+}
+
+void writeFloatString(float n) {
+    char buffer[128];
+    dtostrf(n, 4, 1, buffer);
+    int len = strlen(buffer);
+    Serial.print("Len:");
+    int desired_length = 6;
+    for (int i = 0; i < len - desired_length; ++i) {
+        writeString(" ");
+    }
+    writeString(buffer);
+}
+
+void displayTemporaryMessage(const char* message, int delayTime) {
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    writeString(message);
+    display.display();
+    delay(delayTime);
+    display.clearDisplay();
+    display.setCursor(0, 0);
 }
 
 void generateSequence(Vector<bool>& sequence, int length) {
